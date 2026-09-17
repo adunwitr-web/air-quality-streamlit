@@ -82,9 +82,9 @@ def get_exact_address(lat, lon):
         parts = [p for p in [suburb, district, province] if p]
         if parts:
             return " ".join(parts)
-        return f"พิกัดดาวเทียม ({lat:.4f}, {lon:.4f})"
+        return f"พิกัด ({lat:.4f}, {lon:.4f})"
     except Exception:
-        return f"พิกัดดาวเทียม ({lat:.4f}, {lon:.4f})"
+        return f"พิกัด ({lat:.4f}, {lon:.4f})"
 
 
 # ==========================================
@@ -199,14 +199,13 @@ def sync_wind_input():
 
 
 # ==========================================
-# 7. Sidebar Controls & GPS Device Hook (รองรับคอมพิวเตอร์และมือถือ)
+# 7. Sidebar Controls & ดึงพิกัด GPS (แก้ไขปัญหาสนิท: Timeout Expired)
 # ==========================================
 st.sidebar.markdown("### 🎛️ ตรวจสอบพิกัดอุปกรณ์สด (GPS)")
 st.sidebar.caption(
     f"📅 วันที่ปัจจุบัน: **{datetime.now().strftime('%d/%m/%Y')}**"
 )
 
-# สคริปต์ GPS บังคับ Reload URL ตรง รองรับระบบรักษาความปลอดภัยบน PC
 gps_html = """
 <div style="text-align: center;">
     <button onclick="getLocation()" style="width:100%; height:45px; background-color:#28a745; color:white; font-weight:bold; border:none; border-radius:8px; cursor:pointer;">
@@ -216,6 +215,31 @@ gps_html = """
 </div>
 
 <script>
+function updateUrlWithCoords(lat, lon) {
+    const topUrl = new URL(window.top.location.href);
+    topUrl.searchParams.set('lat', lat);
+    topUrl.searchParams.set('lon', lon);
+    window.top.location.href = topUrl.href;
+}
+
+function fetchLocationByIP() {
+    const status = document.getElementById('gps-status');
+    status.innerHTML = "กำลังดึงพิกัดจากเน็ตเครือข่าย...";
+    fetch('https://ipapi.co/json/')
+        .then(response => response.json())
+        .then(data => {
+            if (data.latitude && data.longitude) {
+                status.innerHTML = "พบพิกัดแล้ว กำลังโหลดข้อมูล...";
+                updateUrlWithCoords(data.latitude, data.longitude);
+            } else {
+                status.innerHTML = "<span style='color:red;'>ไม่สามารถดึงพิกัดได้</span>";
+            }
+        })
+        .catch(err => {
+            status.innerHTML = "<span style='color:red;'>ดึงพิกัดล้มเหลว</span>";
+        });
+}
+
 function getLocation() {
   const status = document.getElementById('gps-status');
   status.innerHTML = "กำลังค้นหาตำแหน่ง...";
@@ -223,27 +247,21 @@ function getLocation() {
   if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(
       function(position) {
-        const lat = position.coords.latitude;
-        const lon = position.coords.longitude;
         status.innerHTML = "พบพิกัดแล้ว กำลังอัปเดต...";
-        
-        const topUrl = new URL(window.top.location.href);
-        topUrl.searchParams.set('lat', lat);
-        topUrl.searchParams.set('lon', lon);
-        window.top.location.href = topUrl.href;
+        updateUrlWithCoords(position.coords.latitude, position.coords.longitude);
       },
       function(error) {
-        if (error.code === error.PERMISSION_DENIED) {
-          alert("⚠️ เบราว์เซอร์/คอมพิวเตอร์ของคุณบล็อกการเข้าถึง Location\\nกรุณากดไอคอนรูปแม่กุญแจ 🔒 ที่แถบ URL ด้านบนเพื่อ 'อนุญาต (Allow)' การใช้ตำแหน่ง");
-          status.innerHTML = "<span style='color:red;'>โปรดอนุญาตสิทธิ์ Location บนเบราว์เซอร์</span>";
-        } else {
-          status.innerHTML = "<span style='color:red;'>ไม่สามารถดึงพิกัดได้: " + error.message + "</span>";
-        }
+        // เมื่อเจอ Timeout หรือ Error อื่นๆ บน PC ให้ใช้ระบบสำรอง (IP Location) ทันที
+        fetchLocationByIP();
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      { 
+        enableHighAccuracy: false, // ปิดโหมดความแม่นยำสูงเพื่อป้องกัน Timeout บนคอมพิวเตอร์
+        timeout: 4000,             // ลดเวลาการรอลงเหลือ 4 วินาที
+        maximumAge: 60000 
+      }
     );
   } else {
-    alert("เบราว์เซอร์นี้ไม่รองรับระบบ GPS");
+    fetchLocationByIP();
   }
 }
 </script>
@@ -271,7 +289,7 @@ if selected_mode == "พิกัดสดจาก GPS อุปกรณ์":
         st.sidebar.info(f"🎯 ได้รับค่า GPS: {target_lat:.4f}, {target_lon:.4f}")
     else:
         st.sidebar.warning(
-            "⚠️ กรุณากดปุ่มสีเขียวด้านบนเพื่อดึงพิกัดจากเบราว์เซอร์"
+            "⚠️ กรุณากดปุ่มสีเขียวด้านบนเพื่อดึงพิกัดอุปกรณ์"
         )
 elif selected_mode == "เลือกจังหวัดหลักในไทย":
     prov_choice = st.sidebar.selectbox(
