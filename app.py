@@ -11,11 +11,11 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 # ==========================================
-# 1. Page Configuration & Custom Styling
+# 1. ตั้งค่าหน้าเว็บและสไตล์ CSS
 # ==========================================
 st.set_page_config(
-    page_title="Global Air Quality Intelligence System",
-    page_icon="🌍",
+    page_title="ระบบประเมินคุณภาพอากาศ Real-Time ประเทศไทย",
+    page_icon="🌤️",
     layout="wide",
 )
 
@@ -37,37 +37,44 @@ st.markdown(
 )
 
 # ==========================================
-# 2. Reverse Geocoding (Global Location Lookup)
+# 2. รายชื่อจังหวัดหลักในไทย (สำหรับตัวเลือกสำรอง)
 # ==========================================
-def get_global_location(lat, lon):
+PROVINCES_TH = {
+    "กรุงเทพมหานคร": (13.7563, 100.5018),
+    "เชียงใหม่": (18.7883, 98.9853),
+    "ขอนแก่น": (16.4322, 102.8236),
+    "ชลบุรี": (13.3611, 100.9847),
+    "สงขลา": (7.1988, 100.5951),
+    "ภูเก็ต": (7.8804, 98.3923),
+    "นครราชสีมา": (14.9799, 102.0978),
+    "อุบลราชธานี": (15.2287, 104.8594),
+}
+
+# ==========================================
+# 3. ฟังก์ชันแปลงพิกัดเป็นชื่อ ตำบล/อำเภอ/จังหวัด ภาษาไทย
+# ==========================================
+def get_thai_location_name(lat, lon):
     try:
-        url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json"
-        headers = {"User-Agent": "GlobalAirQualitySystem/2.0"}
+        url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json&accept-language=th"
+        headers = {"User-Agent": "ThaiAirQualityMonitor/1.0"}
         res = requests.get(url, headers=headers, timeout=5).json()
         address = res.get("address", {})
 
-        city = (
-            address.get("city")
-            or address.get("town")
-            or address.get("suburb")
-            or address.get("county")
-            or ""
-        )
-        state = address.get("state") or address.get("region") or ""
-        country = address.get("country") or ""
+        suburb = address.get("suburb") or address.get("village") or address.get("town") or ""
+        district = address.get("amphoe") or address.get("district") or address.get("county") or ""
+        province = address.get("province") or address.get("state") or address.get("city") or ""
 
-        parts = [p for p in [city, state, country] if p]
+        parts = [p for p in [suburb, district, province] if p]
         if parts:
-            return ", ".join(parts)
-        return f"Coordinates ({lat:.4f}, {lon:.4f})"
+            return " ".join(parts)
+        return f"พิกัด ({lat:.4f}, {lon:.4f})"
     except Exception:
-        return f"Coordinates ({lat:.4f}, {lon:.4f})"
-
+        return f"พิกัด ({lat:.4f}, {lon:.4f})"
 
 # ==========================================
-# 3. Global Weather & Air Quality API
+# 4. ฟังก์ชันดึงสภาพอากาศสดจาก Open-Meteo API
 # ==========================================
-def fetch_global_weather_and_air(lat, lon):
+def fetch_thai_weather_and_air(lat, lon):
     try:
         weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m"
         air_url = f"https://air-quality-api.open-meteo.com/v1/air-quality?latitude={lat}&longitude={lon}&current=pm2_5,pm10,us_aqi"
@@ -75,12 +82,12 @@ def fetch_global_weather_and_air(lat, lon):
         w_res = requests.get(weather_url, timeout=5).json().get("current", {})
         a_res = requests.get(air_url, timeout=5).json().get("current", {})
 
-        location_name = get_global_location(lat, lon)
+        location_name = get_thai_location_name(lat, lon)
 
         return {
             "location_name": location_name,
-            "temp": float(w_res.get("temperature_2m", 25.0)),
-            "humidity": float(w_res.get("relative_humidity_2m", 50.0)),
+            "temp": float(w_res.get("temperature_2m", 28.0)),
+            "humidity": float(w_res.get("relative_humidity_2m", 65.0)),
             "wind": float(w_res.get("wind_speed_10m", 10.0)),
             "pm2_5": float(a_res.get("pm2_5", 0.0)),
             "pm10": float(a_res.get("pm10", 0.0)),
@@ -89,29 +96,28 @@ def fetch_global_weather_and_air(lat, lon):
     except Exception:
         return None
 
-
 # ==========================================
-# 4. ML Model Training (150 Samples, 3 Features, 3 Classes)
+# 5. โมเดล Machine Learning (150 Samples, 3 Features, 3 Classes)
 # ==========================================
 @st.cache_resource
 def get_trained_model():
     np.random.seed(42)
 
-    # Class 0: Good / Optimal (50 samples)
-    temp_0 = np.random.uniform(18.0, 28.0, 50)
-    hum_0 = np.random.uniform(30.0, 60.0, 50)
-    wind_0 = np.random.uniform(12.0, 30.0, 50)
+    # Class 0: ดี (50 Samples)
+    temp_0 = np.random.uniform(22.0, 29.0, 50)
+    hum_0 = np.random.uniform(40.0, 65.0, 50)
+    wind_0 = np.random.uniform(12.0, 25.0, 50)
     class_0 = np.zeros(50)
 
-    # Class 1: Moderate (50 samples)
-    temp_1 = np.random.uniform(29.0, 34.0, 50)
-    hum_1 = np.random.uniform(61.0, 75.0, 50)
+    # Class 1: ปานกลาง (50 Samples)
+    temp_1 = np.random.uniform(30.0, 35.0, 50)
+    hum_1 = np.random.uniform(66.0, 80.0, 50)
     wind_1 = np.random.uniform(6.0, 15.0, 50)
     class_1 = np.ones(50)
 
-    # Class 2: Unhealthy / Severe (50 samples)
-    temp_2 = np.random.uniform(35.0, 45.0, 50)
-    hum_2 = np.random.uniform(76.0, 95.0, 50)
+    # Class 2: อันตราย (50 Samples)
+    temp_2 = np.random.uniform(36.0, 42.0, 50)
+    hum_2 = np.random.uniform(81.0, 95.0, 50)
     wind_2 = np.random.uniform(0.5, 7.0, 50)
     class_2 = np.full(50, 2)
 
@@ -122,73 +128,65 @@ def get_trained_model():
 
     dataset = pd.DataFrame(
         {
-            "Temperature_C": temps,
-            "Humidity_Pct": hums,
-            "WindSpeed_kmh": winds,
-            "AirQuality_Class": y,
+            "อุณหภูมิ": temps,
+            "ความชื้น": hums,
+            "ความเร็วลม": winds,
+            "สถานะ": y,
         }
     )
 
-    X = dataset[["Temperature_C", "Humidity_Pct", "WindSpeed_kmh"]]
+    X = dataset[["อุณหภูมิ", "ความชื้น", "ความเร็วลม"]]
     knn = KNeighborsClassifier(n_neighbors=5)
     knn.fit(X, y)
     return knn, dataset
 
-
 model_knn, dataset_150 = get_trained_model()
 
 # ==========================================
-# 5. Session State Synchronization
+# 6. จัดการ Session State
 # ==========================================
 if "temp_slider_key" not in st.session_state:
-    st.session_state.temp_slider_key = 25.0
-    st.session_state.temp_input_key = 25.0
+    st.session_state.temp_slider_key = 28.0
+    st.session_state.temp_input_key = 28.0
 if "hum_slider_key" not in st.session_state:
-    st.session_state.hum_slider_key = 50.0
-    st.session_state.hum_input_key = 50.0
+    st.session_state.hum_slider_key = 65.0
+    st.session_state.hum_input_key = 65.0
 if "wind_slider_key" not in st.session_state:
     st.session_state.wind_slider_key = 10.0
     st.session_state.wind_input_key = 10.0
 
-
 def sync_temp_slider():
     st.session_state.temp_input_key = st.session_state.temp_slider_key
-
 
 def sync_temp_input():
     st.session_state.temp_slider_key = st.session_state.temp_input_key
 
-
 def sync_hum_slider():
     st.session_state.hum_input_key = st.session_state.hum_slider_key
-
 
 def sync_hum_input():
     st.session_state.hum_slider_key = st.session_state.hum_input_key
 
-
 def sync_wind_slider():
     st.session_state.wind_input_key = st.session_state.wind_slider_key
-
 
 def sync_wind_input():
     st.session_state.wind_slider_key = st.session_state.wind_input_key
 
-
 # ==========================================
-# 6. Sidebar & Geolocation Component
+# 7. เมนูควบคุมด้านข้าง (Sidebar Controls)
 # ==========================================
-st.sidebar.markdown("### 🌐 Global Location Selector")
-st.sidebar.caption(f"📅 UTC Date: **{datetime.utcnow().strftime('%Y-%m-%d')}**")
+st.sidebar.markdown("### 🎛️ ระบุตำแหน่งพื้นที่")
+st.sidebar.caption(f"📅 วันที่ปัจจุบัน: **{datetime.now().strftime('%d/%m/%Y')}**")
 
-# Standard Browser HTML5 Geolocation Hook
+# สคริปต์ JavaScript ดึง GPS สดจากเบราว์เซอร์
 gps_html = """
 <script>
 function getLocation() {
   if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(showPosition, showError, {enableHighAccuracy: true});
   } else {
-    alert("Geolocation is not supported by this browser.");
+    alert("เบราว์เซอร์ไม่รองรับการดึงพิกัด GPS");
   }
 }
 function showPosition(position) {
@@ -204,7 +202,7 @@ function showError(error) {
 }
 </script>
 <button onclick="getLocation()" style="width:100%; height:42px; background-color:#198754; color:white; font-weight:bold; border:none; border-radius:8px; cursor:pointer;">
-📡 Detect Live GPS Location
+📡 ดึงพิกัด GPS สดจากตำแหน่งของคุณ
 </button>
 """
 components.html(gps_html, height=50)
@@ -214,68 +212,41 @@ gps_lat = query_params.get("lat", None)
 gps_lon = query_params.get("lon", None)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 📍 Location Mode")
+st.sidebar.markdown("### 📍 เลือกวิธีการระบุพื้นที่")
 
 selected_mode = st.sidebar.radio(
-    "Select Positioning Method:",
-    ["Browser Auto-GPS", "Global Capital Cities", "Manual Coordinates Input"],
+    "รูปแบบการค้นหา:",
+    ["ดึงพิกัดอัตโนมัติ (GPS)", "เลือกจังหวัดหลักในไทย", "ป้อนพิกัดเอง (ละติจูด/ลองจิจูด)"],
 )
 
-# World Major Cities Sample (Global Standards)
-GLOBAL_CITIES = {
-    "London, United Kingdom": (51.5074, -0.1278),
-    "New York, United States": (40.7128, -74.0060),
-    "Tokyo, Japan": (35.6762, 139.6503),
-    "Paris, France": (48.8566, 2.3522),
-    "Sydney, Australia": (-33.8688, 151.2093),
-    "Bangkok, Thailand": (13.7563, 100.5018),
-    "Singapore": (1.3521, 103.8198),
-}
+target_lat, target_lon = 13.7563, 100.5018  # ค่าเริ่มต้นกลาง (กรุงเทพฯ)
 
-target_lat, target_lon = 0.0, 0.0  # Neutral Default (Equator)
-
-if selected_mode == "Browser Auto-GPS":
+if selected_mode == "ดึงพิกัดอัตโนมัติ (GPS)":
     if gps_lat and gps_lon:
         target_lat = float(gps_lat)
         target_lon = float(gps_lon)
-        st.sidebar.info(
-            f"🎯 Live Signal: {target_lat:.4f}, {target_lon:.4f}"
-        )
+        st.sidebar.info(f"🎯 รับสัญญาณ GPS: {target_lat:.4f}, {target_lon:.4f}")
     else:
-        st.sidebar.warning(
-            "⚠️ Click the green button above to grant browser location permission."
-        )
-elif selected_mode == "Global Capital Cities":
-    city_choice = st.sidebar.selectbox(
-        "Choose City:", list(GLOBAL_CITIES.keys())
-    )
-    target_lat, target_lon = GLOBAL_CITIES[city_choice]
+        st.sidebar.warning("⚠️ กดปุ่มสีเขียวด้านบนเพื่ออนุญาตให้ดึงตำแหน่งของคุณ")
+elif selected_mode == "เลือกจังหวัดหลักในไทย":
+    prov_choice = st.sidebar.selectbox("เลือกจังหวัด:", list(PROVINCES_TH.keys()))
+    target_lat, target_lon = PROVINCES_TH[prov_choice]
 else:
-    target_lat = st.sidebar.number_input(
-        "Latitude (-90.0 to 90.0)", value=13.7563, format="%.4f"
-    )
-    target_lon = st.sidebar.number_input(
-        "Longitude (-180.0 to 180.0)", value=100.5018, format="%.4f"
-    )
+    target_lat = st.sidebar.number_input("ละติจูด (Latitude)", value=13.7563, format="%.4f")
+    target_lon = st.sidebar.number_input("ลองจิจูด (Longitude)", value=100.5018, format="%.4f")
 
-if st.sidebar.button("🔄 Sync Live Weather & Air Data", use_container_width=True):
-    with st.spinner("Fetching global meteorological data..."):
-        data = fetch_global_weather_and_air(target_lat, target_lon)
+if st.sidebar.button("🔄 ดึงข้อมูลสภาพอากาศจุดนี้แบบ Real-Time", use_container_width=True):
+    with st.spinner("กำลังเชื่อมต่อข้อมูลสภาพอากาศและมลพิษสด..."):
+        data = fetch_thai_weather_and_air(target_lat, target_lon)
 
         if data:
-            st.session_state.temp_slider_key = min(
-                max(data["temp"], -20.0), 50.0
-            )
+            st.session_state.temp_slider_key = min(max(data["temp"], 15.0), 45.0)
             st.session_state.temp_input_key = st.session_state.temp_slider_key
 
-            st.session_state.hum_slider_key = min(
-                max(data["humidity"], 0.0), 100.0
-            )
+            st.session_state.hum_slider_key = min(max(data["humidity"], 30.0), 100.0)
             st.session_state.hum_input_key = st.session_state.hum_slider_key
 
-            st.session_state.wind_slider_key = min(
-                max(data["wind"], 0.0), 100.0
-            )
+            st.session_state.wind_slider_key = min(max(data["wind"], 0.0), 50.0)
             st.session_state.wind_input_key = st.session_state.wind_slider_key
 
             st.session_state["live_pm25"] = data["pm2_5"]
@@ -283,155 +254,101 @@ if st.sidebar.button("🔄 Sync Live Weather & Air Data", use_container_width=Tr
             st.session_state["live_aqi"] = data["us_aqi"]
             st.session_state["live_city"] = data["location_name"]
 
-            st.sidebar.success(f"📍 Synchronized: {data['location_name']}")
+            st.sidebar.success(f"📍 ระบุพื้นที่: {data['location_name']}")
             st.rerun()
 
-# Environmental Feature Controls
+# แถบปรับค่าฟีเจอร์
 st.sidebar.markdown("---")
-st.sidebar.markdown("**🌡️ Temperature (°C)**")
+st.sidebar.markdown("**🌡️ อุณหภูมิ (°C)**")
 col_t1, col_t2 = st.sidebar.columns([1.3, 1])
 with col_t1:
-    st.slider(
-        "t_s",
-        -20.0,
-        50.0,
-        step=0.1,
-        key="temp_slider_key",
-        on_change=sync_temp_slider,
-        label_visibility="collapsed",
-    )
+    st.slider("t_s", 15.0, 45.0, step=0.1, key="temp_slider_key", on_change=sync_temp_slider, label_visibility="collapsed")
 with col_t2:
-    temp = st.number_input(
-        "t_i",
-        -20.0,
-        50.0,
-        step=0.1,
-        key="temp_input_key",
-        on_change=sync_temp_input,
-        label_visibility="collapsed",
-    )
+    temp = st.number_input("t_i", 15.0, 45.0, step=0.1, key="temp_input_key", on_change=sync_temp_input, label_visibility="collapsed")
 
-st.sidebar.markdown("**💧 Relative Humidity (%)**")
+st.sidebar.markdown("**💧 ความชื้นสัมพัทธ์ (%)**")
 col_h1, col_h2 = st.sidebar.columns([1.3, 1])
 with col_h1:
-    st.slider(
-        "h_s",
-        0.0,
-        100.0,
-        step=0.1,
-        key="hum_slider_key",
-        on_change=sync_hum_slider,
-        label_visibility="collapsed",
-    )
+    st.slider("h_s", 30.0, 100.0, step=0.1, key="hum_slider_key", on_change=sync_hum_slider, label_visibility="collapsed")
 with col_h2:
-    humidity = st.number_input(
-        "h_i",
-        0.0,
-        100.0,
-        step=0.1,
-        key="hum_input_key",
-        on_change=sync_hum_input,
-        label_visibility="collapsed",
-    )
+    humidity = st.number_input("h_i", 30.0, 100.0, step=0.1, key="hum_input_key", on_change=sync_hum_input, label_visibility="collapsed")
 
-st.sidebar.markdown("**🌬️ Wind Speed (km/h)**")
+st.sidebar.markdown("**🌬️ ความเร็วลม (km/h)**")
 col_w1, col_w2 = st.sidebar.columns([1.3, 1])
 with col_w1:
-    st.slider(
-        "w_s",
-        0.0,
-        100.0,
-        step=0.1,
-        key="wind_slider_key",
-        on_change=sync_wind_slider,
-        label_visibility="collapsed",
-    )
+    st.slider("w_s", 0.0, 50.0, step=0.1, key="wind_slider_key", on_change=sync_wind_slider, label_visibility="collapsed")
 with col_w2:
-    wind_speed = st.number_input(
-        "w_i",
-        0.0,
-        100.0,
-        step=0.1,
-        key="wind_input_key",
-        on_change=sync_wind_input,
-        label_visibility="collapsed",
-    )
+    wind_speed = st.number_input("w_i", 0.0, 50.0, step=0.1, key="wind_input_key", on_change=sync_wind_input, label_visibility="collapsed")
 
 st.sidebar.write("")
-predict_btn = st.sidebar.button("✨ Evaluate Air Quality Index", type="primary")
+predict_btn = st.sidebar.button("✨ ประเมินผลคุณภาพอากาศ", type="primary")
 
 # ==========================================
-# 7. Main Dashboard Interface
+# 8. ส่วนแสดงผลหลัก (Main Dashboard)
 # ==========================================
-st.title("🌍 Global Air Quality Intelligence System")
-st.caption(
-    "Real-Time Meteorological Data Sync | Machine Learning Classification Model (150 Samples, 3 Features, 3 Classes)"
-)
+st.title("🌤️ ระบบประเมินคุณภาพอากาศ Real-Time ประเทศไทย")
+st.caption("ดึงข้อมูลสภาพอากาศและมลพิษฝุ่นสดรายพื้นที่ทั่วไทย ประมวลผลร่วมกับโมเดล Machine Learning (150 ตัวอย่าง, 3 ปัจจัย, 3 ระดับ)")
 st.divider()
 
 if "live_pm25" in st.session_state:
-    st.markdown(
-        f"#### 📍 Target Location: **{st.session_state.get('live_city', 'Unspecified')}**"
-    )
+    st.markdown(f"#### 📍 ข้อมูลสภาวะอากาศสด ณ ตำแหน่ง: **{st.session_state.get('live_city', 'ไม่ระบุ')}**")
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Live PM2.5", f"{st.session_state['live_pm25']} µg/m³")
-    m2.metric("Live PM10", f"{st.session_state['live_pm10']} µg/m³")
-    m3.metric("US AQI Index", f"{st.session_state['live_aqi']}")
-    m4.metric(
-        "Last Updated (UTC)", datetime.utcnow().strftime("%H:%M:%S")
-    )
+    m1.metric("ฝุ่น PM2.5 สด", f"{st.session_state['live_pm25']} µg/m³")
+    m2.metric("ฝุ่น PM10 สด", f"{st.session_state['live_pm10']} µg/m³")
+    m3.metric("ดัชนี US AQI", f"{st.session_state['live_aqi']}")
+    m4.metric("เวลาอัปเดตล่าสุด", datetime.now().strftime("%H:%M:%S น."))
     st.divider()
 
 if predict_btn:
     input_df = pd.DataFrame(
         [[temp, humidity, wind_speed]],
-        columns=["Temperature_C", "Humidity_Pct", "WindSpeed_kmh"],
+        columns=["อุณหภูมิ", "ความชื้น", "ความเร็วลม"],
     )
     pred_code = int(model_knn.predict(input_df)[0])
     confidence = model_knn.predict_proba(input_df)[0][pred_code] * 100
 
     status_details = {
         0: {
-            "title": "Air Quality Status: GOOD 🟢",
+            "title": "คุณภาพอากาศดีมาก 🟢 (Good)",
             "alert": "success",
-            "desc": "Air quality is considered satisfactory, and air pollution poses little or no risk.",
-            "tag": "Good",
+            "desc": "สภาพอากาศสะอาด เหมาะแก่การทำกิจกรรม outdoor และการออกกำลังกายกลางแจ้ง",
+            "tag": "ดี",
         },
         1: {
-            "title": "Air Quality Status: MODERATE 🟡",
+            "title": "คุณภาพอากาศปานกลาง 🟡 (Moderate)",
             "alert": "warning",
-            "desc": "Air quality is acceptable; however, sensitive groups may experience minor health effects.",
-            "tag": "Moderate",
+            "desc": "ผู้มีภูมิแพ้หรือกลุ่มเสี่ยงควรสวมหน้ากากอนามัยเมื่อต้องอยู่กลางแจ้งเป็นเวลานาน",
+            "tag": "ปานกลาง",
         },
         2: {
-            "title": "Air Quality Status: UNHEALTHY 🔴",
+            "title": "คุณภาพอากาศอยู่ในระดับเสี่ยงอันตราย 🔴 (Unhealthy)",
             "alert": "error",
-            "desc": "Health alert: Everyone may begin to experience health effects. Avoid outdoor activities.",
-            "tag": "Unhealthy",
+            "desc": "เสี่ยงอันตรายต่อสุขภาพ! หลีกเลี่ยงกิจกรรมกลางแจ้งทุกชนิด และสวมหน้ากากป้องกัน PM2.5",
+            "tag": "อันตราย",
         },
     }
 
     res = status_details.get(
         pred_code,
         {
-            "title": "Status Unknown",
+            "title": "ไม่สามารถประเมินได้",
             "alert": "info",
             "desc": "-",
-            "tag": "Unknown",
+            "tag": "ไม่ทราบผล",
         },
     )
 
-    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     history_file = "prediction_history.csv"
     new_data = pd.DataFrame(
         [
             {
-                "Timestamp_UTC": now_str,
+                "Timestamp": now_str,
                 "Temperature_C": temp,
-                "Humidity_Pct": humidity,
+                "Humidity_Percent": humidity,
                 "WindSpeed_kmh": wind_speed,
-                "Predicted_Class": res["tag"],
-                "Confidence_Pct": round(confidence, 2),
+                "Predicted_Status": res["tag"],
+                "Confidence_Percent": round(confidence, 2),
             }
         ]
     )
@@ -446,42 +363,40 @@ if predict_btn:
 
     col1, col2, col3 = st.columns([1.5, 1, 1])
     with col1:
-        st.subheader("📌 Classification Assessment")
+        st.subheader("📌 ผลการประเมินสภาวะอากาศ")
         if res["alert"] == "success":
             st.success(f"### {res['title']}")
         elif res["alert"] == "warning":
             st.warning(f"### {res['title']}")
         else:
             st.error(f"### {res['title']}")
-        st.write(f"**Health Guidelines:** {res['desc']}")
+        st.write(f"**คำแนะนำด้านสุขภาพ:** {res['desc']}")
 
     with col2:
         st.metric(
-            label="🎯 Model Confidence",
+            label="🎯 ระดับความเชื่อมั่นโมเดล",
             value=f"{confidence:.1f}%",
-            delta="Nominal",
+            delta="ปกติ",
         )
     with col3:
         st.metric(
-            label="🕒 Processing Time (UTC)",
-            value=datetime.utcnow().strftime("%H:%M:%S"),
-            delta=datetime.utcnow().strftime("%Y-%m-%d"),
+            label="🕒 เวลาประมวลผล",
+            value=datetime.now().strftime("%H:%M:%S"),
+            delta=datetime.now().strftime("%d/%m/%Y"),
         )
 
 # ==========================================
-# 8. Model Dataset & Analytics Report
+# 9. รายงานข้อมูลและประวัติ
 # ==========================================
 st.divider()
-st.subheader("📊 Model Dataset & Prediction History Log")
+st.subheader("📊 ตารางข้อมูลสำหรับตรวจเช็คและประวัติการประเมิน")
 
 tab1, tab2 = st.tabs(
-    ["📁 Training Dataset (150 Samples)", "📋 Historical Prediction Records"]
+    ["📁 ชุดข้อมูล 150 Samples (สำหรับตรวจ)", "📋 บันทึกประวัติการวิเคราะห์"]
 )
 
 with tab1:
-    st.write(
-        "**Machine Learning Dataset Overview: 3 Features | 3 Classes (Good, Moderate, Unhealthy) | 150 Samples**"
-    )
+    st.write("**ตารางชุดข้อมูลสำหรับเทรนโมเดล (150 ตัวอย่าง, 3 ปัจจัย, 3 ระดับ):**")
     st.dataframe(dataset_150, use_container_width=True)
 
 with tab2:
@@ -489,8 +404,8 @@ with tab2:
     if os.path.exists(history_file):
         df_history = pd.read_csv(history_file, encoding="utf-8-sig")
         st.dataframe(
-            df_history.tail(15).sort_values(by="Timestamp_UTC", ascending=False),
+            df_history.tail(15).sort_values(by="Timestamp", ascending=False),
             use_container_width=True,
         )
     else:
-        st.info("No assessment records captured yet.")
+        st.info("ยังไม่มีประวัติการบันทึกข้อมูล")
