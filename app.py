@@ -82,9 +82,9 @@ def get_exact_address(lat, lon):
         parts = [p for p in [suburb, district, province] if p]
         if parts:
             return " ".join(parts)
-        return f"พิกัด ({lat:.4f}, {lon:.4f})"
+        return f"พิกัดดาวเทียม ({lat:.4f}, {lon:.4f})"
     except Exception:
-        return f"พิกัด ({lat:.4f}, {lon:.4f})"
+        return f"พิกัดดาวเทียม ({lat:.4f}, {lon:.4f})"
 
 
 # ==========================================
@@ -199,40 +199,56 @@ def sync_wind_input():
 
 
 # ==========================================
-# 7. Sidebar Controls & ดึงพิกัด GPS
+# 7. Sidebar Controls & GPS Device Hook (รองรับคอมพิวเตอร์และมือถือ)
 # ==========================================
 st.sidebar.markdown("### 🎛️ ตรวจสอบพิกัดอุปกรณ์สด (GPS)")
 st.sidebar.caption(
     f"📅 วันที่ปัจจุบัน: **{datetime.now().strftime('%d/%m/%Y')}**"
 )
 
-# JavaScript ดึงพิกัด GPS บนอุปกรณ์ผู้ใช้
+# สคริปต์ GPS บังคับ Reload URL ตรง รองรับระบบรักษาความปลอดภัยบน PC
 gps_html = """
+<div style="text-align: center;">
+    <button onclick="getLocation()" style="width:100%; height:45px; background-color:#28a745; color:white; font-weight:bold; border:none; border-radius:8px; cursor:pointer;">
+    📡 กดเพื่อดึงพิกัด GPS สดจากอุปกรณ์
+    </button>
+    <p id="gps-status" style="font-size: 12px; color: #6c757d; margin-top: 5px;"></p>
+</div>
+
 <script>
 function getLocation() {
+  const status = document.getElementById('gps-status');
+  status.innerHTML = "กำลังค้นหาตำแหน่ง...";
+
   if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(showPosition, showError, {enableHighAccuracy: true});
+    navigator.geolocation.getCurrentPosition(
+      function(position) {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        status.innerHTML = "พบพิกัดแล้ว กำลังอัปเดต...";
+        
+        const topUrl = new URL(window.top.location.href);
+        topUrl.searchParams.set('lat', lat);
+        topUrl.searchParams.set('lon', lon);
+        window.top.location.href = topUrl.href;
+      },
+      function(error) {
+        if (error.code === error.PERMISSION_DENIED) {
+          alert("⚠️ เบราว์เซอร์/คอมพิวเตอร์ของคุณบล็อกการเข้าถึง Location\\nกรุณากดไอคอนรูปแม่กุญแจ 🔒 ที่แถบ URL ด้านบนเพื่อ 'อนุญาต (Allow)' การใช้ตำแหน่ง");
+          status.innerHTML = "<span style='color:red;'>โปรดอนุญาตสิทธิ์ Location บนเบราว์เซอร์</span>";
+        } else {
+          status.innerHTML = "<span style='color:red;'>ไม่สามารถดึงพิกัดได้: " + error.message + "</span>";
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
   } else {
-    alert("เบราว์เซอร์ไม่รองรับการดึงพิกัด GPS");
+    alert("เบราว์เซอร์นี้ไม่รองรับระบบ GPS");
   }
 }
-function showPosition(position) {
-  const lat = position.coords.latitude;
-  const lon = position.coords.longitude;
-  window.parent.postMessage({
-    type: 'streamlit:setQueryParams',
-    queryParams: {lat: lat, lon: lon}
-  }, '*');
-}
-function showError(error) {
-  console.log("GPS Error: " + error.message);
-}
 </script>
-<button onclick="getLocation()" style="width:100%; height:42px; background-color:#28a745; color:white; font-weight:bold; border:none; border-radius:8px; cursor:pointer;">
-📡 กดเพื่อดึงพิกัด GPS สดจากอุปกรณ์ของคุณ
-</button>
 """
-components.html(gps_html, height=50)
+components.html(gps_html, height=75)
 
 query_params = st.query_params
 gps_lat = query_params.get("lat", None)
@@ -255,7 +271,7 @@ if selected_mode == "พิกัดสดจาก GPS อุปกรณ์":
         st.sidebar.info(f"🎯 ได้รับค่า GPS: {target_lat:.4f}, {target_lon:.4f}")
     else:
         st.sidebar.warning(
-            "⚠️ กรุณากดปุ่มสีเขียวด้านบนเพื่ออนุญาตให้ดึงพิกัด GPS"
+            "⚠️ กรุณากดปุ่มสีเขียวด้านบนเพื่อดึงพิกัดจากเบราว์เซอร์"
         )
 elif selected_mode == "เลือกจังหวัดหลักในไทย":
     prov_choice = st.sidebar.selectbox(
