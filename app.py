@@ -1,8 +1,10 @@
 ﻿from datetime import datetime
 import os
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import requests
+import seaborn as sns
 from sklearn.neighbors import KNeighborsClassifier
 
 import streamlit as st
@@ -12,7 +14,7 @@ import streamlit.components.v1 as components
 # 1. ตั้งค่าหน้าเว็บ
 # ==========================================
 st.set_page_config(
-    page_title="ระบบประเมินคุณภาพอากาศ Real-Time แม่นยำสูง",
+    page_title="ระบบวิเคราะห์คุณภาพอากาศ Real-Time | รัตภูมิ สงขลา",
     page_icon="🌤️",
     layout="wide",
 )
@@ -35,43 +37,57 @@ st.markdown(
 )
 
 # ==========================================
-# 2. ฟังก์ชันแปลงพิกัดและดึงชื่อสถานที่ (High-Reliability Geocoding)
+# 2. ฐานข้อมูล 77 จังหวัด (ค่าสำรอง)
 # ==========================================
-def get_exact_location_name(lat, lon):
-    # พยายามดึงชื่อสถานที่ผ่าน Open-Meteo Direct Reverse Geocoding ก่อน
-    try:
-        url = f"https://geocoding-api.open-meteo.com/v1/search?name={lat},{lon}&count=1&language=th&format=json"
-        res = requests.get(url, timeout=3).json()
-        if "results" in res and len(res["results"]) > 0:
-            loc = res["results"][0]
-            name = loc.get("name", "")
-            admin1 = loc.get("admin1", "")
-            country = loc.get("country", "")
-            return f"{name} {admin1} {country}".strip()
-    except Exception:
-        pass
+THAI_PROVINCES = {
+    "สงขลา (รัตภูมิ / พิกัดศูนย์กลาง)": (7.1350, 100.2783),
+    "สงขลา (ตัวเมือง)": (7.1988, 100.5951),
+    "กรุงเทพมหานคร": (13.7563, 100.5018),
+    "เชียงใหม่": (18.7883, 98.9853),
+    "ภูเก็ต": (7.8804, 98.3923),
+    "ขอนแก่น": (16.4322, 102.8236),
+    "ชลบุรี": (13.3611, 100.9847),
+}
 
-    # สำรองด้วย Nominatim API
+# ==========================================
+# 3. Reverse Geocoding (ค้นหา ตำบล/อำเภอ/จังหวัด จาก พิกัด GPS สด)
+# ==========================================
+def get_exact_address(lat, lon):
     try:
         url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json&accept-language=th"
-        headers = {"User-Agent": "HighPrecisionAirMonitor/3.0"}
-        res = requests.get(url, headers=headers, timeout=3).json()
+        headers = {"User-Agent": "RattaphumAirCheck_App/1.0"}
+        res = requests.get(url, headers=headers, timeout=5).json()
         address = res.get("address", {})
 
-        suburb = address.get("suburb") or address.get("village") or address.get("town") or ""
-        district = address.get("amphoe") or address.get("district") or address.get("county") or ""
-        province = address.get("province") or address.get("state") or address.get("city") or ""
+        suburb = (
+            address.get("suburb")
+            or address.get("village")
+            or address.get("town")
+            or ""
+        )
+        district = (
+            address.get("amphoe")
+            or address.get("district")
+            or address.get("county")
+            or ""
+        )
+        province = (
+            address.get("province")
+            or address.get("state")
+            or address.get("city")
+            or ""
+        )
 
         parts = [p for p in [suburb, district, province] if p]
         if parts:
             return " ".join(parts)
+        return f"พิกัดดาวเทียม ({lat:.4f}, {lon:.4f})"
     except Exception:
-        pass
+        return f"พิกัดดาวเทียม ({lat:.4f}, {lon:.4f})"
 
-    return f"พิกัดแม่นยำสูง ({lat:.5f}, {lon:.5f})"
 
 # ==========================================
-# 3. ฟังก์ชันดึงมลพิษและสภาพอากาศ Real-Time
+# 4. ดึงข้อมูลมลพิษระดับตาราง Grid 1 km จาก Open-Meteo
 # ==========================================
 def fetch_exact_weather_and_air(lat, lon):
     try:
@@ -81,7 +97,7 @@ def fetch_exact_weather_and_air(lat, lon):
         w_res = requests.get(weather_url, timeout=5).json().get("current", {})
         a_res = requests.get(air_url, timeout=5).json().get("current", {})
 
-        location_name = get_exact_location_name(lat, lon)
+        location_name = get_exact_address(lat, lon)
 
         return {
             "location_name": location_name,
@@ -95,23 +111,27 @@ def fetch_exact_weather_and_air(lat, lon):
     except Exception:
         return None
 
+
 # ==========================================
-# 4. โมเดล Machine Learning (150 Samples, 3 Features, 3 Classes)
+# 5. โมเดล ML ตามโจทย์อาจารย์ (3 Features, 3 Classes, 150 Samples)
 # ==========================================
 @st.cache_resource
 def get_trained_model():
     np.random.seed(42)
 
+    # Class 0: ดี (50 ตัวอย่าง)
     temp_0 = np.random.uniform(22.0, 29.0, 50)
     hum_0 = np.random.uniform(40.0, 65.0, 50)
     wind_0 = np.random.uniform(12.0, 25.0, 50)
     class_0 = np.zeros(50)
 
+    # Class 1: ปานกลาง (50 ตัวอย่าง)
     temp_1 = np.random.uniform(30.0, 35.0, 50)
     hum_1 = np.random.uniform(66.0, 80.0, 50)
     wind_1 = np.random.uniform(6.0, 15.0, 50)
     class_1 = np.ones(50)
 
+    # Class 2: อันตราย (50 ตัวอย่าง)
     temp_2 = np.random.uniform(36.0, 42.0, 50)
     hum_2 = np.random.uniform(81.0, 95.0, 50)
     wind_2 = np.random.uniform(0.5, 7.0, 50)
@@ -136,10 +156,11 @@ def get_trained_model():
     knn.fit(X, y)
     return knn, dataset
 
+
 model_knn, dataset_150 = get_trained_model()
 
 # ==========================================
-# 5. Session State Sync
+# 6. Session State & Callbacks
 # ==========================================
 if "temp_slider_key" not in st.session_state:
     st.session_state.temp_slider_key = 28.0
@@ -151,104 +172,123 @@ if "wind_slider_key" not in st.session_state:
     st.session_state.wind_slider_key = 10.0
     st.session_state.wind_input_key = 10.0
 
+
 def sync_temp_slider():
     st.session_state.temp_input_key = st.session_state.temp_slider_key
+
 
 def sync_temp_input():
     st.session_state.temp_slider_key = st.session_state.temp_input_key
 
+
 def sync_hum_slider():
     st.session_state.hum_input_key = st.session_state.hum_slider_key
+
 
 def sync_hum_input():
     st.session_state.hum_slider_key = st.session_state.hum_input_key
 
+
 def sync_wind_slider():
     st.session_state.wind_input_key = st.session_state.wind_slider_key
+
 
 def sync_wind_input():
     st.session_state.wind_slider_key = st.session_state.wind_input_key
 
-# ==========================================
-# 6. Sidebar & Ultra-High Precision GPS JavaScript
-# ==========================================
-st.sidebar.markdown("### 🎛️ ระบบดึงพิกัด GPS อุปกรณ์สด")
-st.sidebar.caption(f"📅 วันที่: **{datetime.now().strftime('%d/%m/%Y')}**")
 
-# สคริปต์ GPS พิเศษ: เปิด High Accuracy + Timeout Guard + Auto Sync
-high_precision_gps_html = """
-<div style="text-align:center;">
-    <button onclick="getExactGPS()" style="width:100%; height:45px; background-color:#198754; color:white; font-weight:bold; border:none; border-radius:8px; cursor:pointer; font-size:14px;">
-        📡 กดปุ่มนี้เพื่อค้นหาพิกัด GPS สด (ตรงจุด 100%)
-    </button>
-    <p id="status" style="font-size:12px; color:#6c757d; margin-top:5px;"></p>
-</div>
+# ==========================================
+# 7. Sidebar Controls & GPS Device Hook
+# ==========================================
+st.sidebar.markdown("### 🎛️ ตรวจสอบพิกัดอุปกรณ์สด (GPS)")
+st.sidebar.caption(
+    f"📅 วันที่ปัจจุบัน: **{datetime.now().strftime('%d/%m/%Y')}**"
+)
 
+# JavaScript สั่งดึงพิกัดจากชิป GPS บนมือถือ/คอมพิวเตอร์
+gps_html = """
 <script>
-function getExactGPS() {
-  const status = document.getElementById('status');
-  status.innerText = "กำลังค้นหาสัญญาณดาวเทียม GPS...";
-
+function getLocation() {
   if (navigator.geolocation) {
-    const options = {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 0
-    };
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const lat = position.coords.latitude;
-        const lon = position.coords.longitude;
-        status.innerText = "ส่งค่าพิกัดสำเร็จ!";
-        
-        // ส่งพิกัดเข้า Streamlit URL Query Parameters
-        const url = new URL(window.location.href);
-        url.searchParams.set('lat', lat);
-        url.searchParams.set('lon', lon);
-        window.parent.location.href = url.href;
-      },
-      (error) => {
-        status.innerText = "ข้อผิดพลาด: " + error.message + " (โปรดอนุญาตให้เบราว์เซอร์ใช้ Location)";
-      },
-      options
-    );
+    navigator.geolocation.getCurrentPosition(showPosition, showError, {enableHighAccuracy: true});
   } else {
-    status.innerText = "เบราว์เซอร์ไม่รองรับ GPS";
+    alert("เบราว์เซอร์ไม่รองรับ GPS");
   }
 }
+function showPosition(position) {
+  const lat = position.coords.latitude;
+  const lon = position.coords.longitude;
+  const urlParams = new URLSearchParams(window.location.search);
+  window.parent.postMessage({
+    type: 'streamlit:setQueryParams',
+    queryParams: {lat: lat, lon: lon}
+  }, '*');
+}
+function showError(error) {
+  console.log("GPS Error: " + error.message);
+}
 </script>
+<button onclick="getLocation()" style="width:100%; height:42px; background-color:#28a745; color:white; font-weight:bold; border:none; border-radius:8px; cursor:pointer;">
+📡 กดเพื่อดึงพิกัด GPS จริงจากดาวเทียม
+</button>
 """
-components.html(high_precision_gps_html, height=80)
+components.html(gps_html, height=50)
 
+# เช็คว่ามี query param จาก GPS หรือไม่
 query_params = st.query_params
 gps_lat = query_params.get("lat", None)
 gps_lon = query_params.get("lon", None)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 📍 ทางเลือก: ป้อนพิกัดตรงด้วยตัวเอง")
+st.sidebar.markdown("### 📍 หรือเลือกพื้นที่ / ป้อนพิกัดมือ")
 
-if gps_lat and gps_lon:
-    target_lat = float(gps_lat)
-    target_lon = float(gps_lon)
-    st.sidebar.success(f"🎯 พิกัด GPS สด: {target_lat:.5f}, {target_lon:.5f}")
+selected_mode = st.sidebar.radio(
+    "โหมดระบุพื้นที่:",
+    ["พิกัดจากดาวเทียม GPS", "เลือกอำเภอ/จังหวัดในระบบ", "กรอก ละติจูด/ลองจิจูด เอง"],
+)
+
+target_lat, target_lon = 7.1350, 100.2783  # ค่าเริ่มต้น: อ.รัตภูมิ สงขลา
+
+if selected_mode == "พิกัดจากดาวเทียม GPS":
+    if gps_lat and gps_lon:
+        target_lat = float(gps_lat)
+        target_lon = float(gps_lon)
+        st.sidebar.info(f"🎯 ได้รับ GPS สด: {target_lat:.4f}, {target_lon:.4f}")
+    else:
+        st.sidebar.warning(
+            "⚠️ กรุณากดปุ่มสีเขียวด้านบนเพื่อส่งค่า GPS จากอุปกรณ์เข้าสู่ระบบ"
+        )
+elif selected_mode == "เลือกอำเภอ/จังหวัดในระบบ":
+    prov_choice = st.sidebar.selectbox(
+        "เลือกพื้นที่:", list(THAI_PROVINCES.keys())
+    )
+    target_lat, target_lon = THAI_PROVINCES[prov_choice]
 else:
-    st.sidebar.info("💡 หากไม่กดปุ่ม GPS สดด้านบน สามารถป้อนพิกัดด้านล่างนี้ได้:")
-    target_lat = st.sidebar.number_input("ละติจูด (Latitude)", value=13.7563, format="%.5f")
-    target_lon = st.sidebar.number_input("ลองจิจูด (Longitude)", value=100.5018, format="%.5f")
+    target_lat = st.sidebar.number_input(
+        "Latitude (รัตภูมิ ~ 7.1350)", value=7.1350, format="%.5f"
+    )
+    target_lon = st.sidebar.number_input(
+        "Longitude (รัตภูมิ ~ 100.2783)", value=100.2783, format="%.5f"
+    )
 
-if st.sidebar.button("🔄 อัปเดตสภาพอากาศ ณ พิกัดปัจจุบัน", use_container_width=True):
-    with st.spinner("กำลังดึงข้อมูลสภาพอากาศตรงจุด..."):
+if st.sidebar.button("🔄 ดึงข้อมูลสภาพอากาศจุดนี้แบบตรงเป๊ะ", use_container_width=True):
+    with st.spinner("กำลังเชื่อมต่อดาวเทียมและสถานีวัดอากาศใกล้ที่สุด..."):
         data = fetch_exact_weather_and_air(target_lat, target_lon)
 
         if data:
-            st.session_state.temp_slider_key = min(max(data["temp"], 15.0), 45.0)
+            st.session_state.temp_slider_key = min(
+                max(data["temp"], 15.0), 45.0
+            )
             st.session_state.temp_input_key = st.session_state.temp_slider_key
 
-            st.session_state.hum_slider_key = min(max(data["humidity"], 30.0), 100.0)
+            st.session_state.hum_slider_key = min(
+                max(data["humidity"], 30.0), 100.0
+            )
             st.session_state.hum_input_key = st.session_state.hum_slider_key
 
-            st.session_state.wind_slider_key = min(max(data["wind"], 0.0), 50.0)
+            st.session_state.wind_slider_key = min(
+                max(data["wind"], 0.0), 30.0
+            )
             st.session_state.wind_input_key = st.session_state.wind_slider_key
 
             st.session_state["live_pm25"] = data["pm2_5"]
@@ -256,49 +296,103 @@ if st.sidebar.button("🔄 อัปเดตสภาพอากาศ ณ พ
             st.session_state["live_aqi"] = data["us_aqi"]
             st.session_state["live_city"] = data["location_name"]
 
-            st.sidebar.success(f"📍 สภาพอากาศ: {data['location_name']}")
+            st.sidebar.success(f"📍 ระบุตำแหน่ง: {data['location_name']}")
             st.rerun()
 
-# แถบควบคุมตัวแปร
+# Controls
 st.sidebar.markdown("---")
 st.sidebar.markdown("**🌡️ อุณหภูมิ (°C)**")
 col_t1, col_t2 = st.sidebar.columns([1.3, 1])
 with col_t1:
-    st.slider("t_s", 15.0, 45.0, step=0.1, key="temp_slider_key", on_change=sync_temp_slider, label_visibility="collapsed")
+    st.slider(
+        "t_s",
+        15.0,
+        45.0,
+        step=0.1,
+        key="temp_slider_key",
+        on_change=sync_temp_slider,
+        label_visibility="collapsed",
+    )
 with col_t2:
-    temp = st.number_input("t_i", 15.0, 45.0, step=0.1, key="temp_input_key", on_change=sync_temp_input, label_visibility="collapsed")
+    temp = st.number_input(
+        "t_i",
+        15.0,
+        45.0,
+        step=0.1,
+        key="temp_input_key",
+        on_change=sync_temp_input,
+        label_visibility="collapsed",
+    )
 
 st.sidebar.markdown("**💧 ความชื้นสัมพัทธ์ (%)**")
 col_h1, col_h2 = st.sidebar.columns([1.3, 1])
 with col_h1:
-    st.slider("h_s", 30.0, 100.0, step=0.1, key="hum_slider_key", on_change=sync_hum_slider, label_visibility="collapsed")
+    st.slider(
+        "h_s",
+        30.0,
+        100.0,
+        step=0.1,
+        key="hum_slider_key",
+        on_change=sync_hum_slider,
+        label_visibility="collapsed",
+    )
 with col_h2:
-    humidity = st.number_input("h_i", 30.0, 100.0, step=0.1, key="hum_input_key", on_change=sync_hum_input, label_visibility="collapsed")
+    humidity = st.number_input(
+        "h_i",
+        30.0,
+        100.0,
+        step=0.1,
+        key="hum_input_key",
+        on_change=sync_hum_input,
+        label_visibility="collapsed",
+    )
 
 st.sidebar.markdown("**🌬️ ความเร็วลม (km/h)**")
 col_w1, col_w2 = st.sidebar.columns([1.3, 1])
 with col_w1:
-    st.slider("w_s", 0.0, 50.0, step=0.1, key="wind_slider_key", on_change=sync_wind_slider, label_visibility="collapsed")
+    st.slider(
+        "w_s",
+        0.0,
+        30.0,
+        step=0.1,
+        key="wind_slider_key",
+        on_change=sync_wind_slider,
+        label_visibility="collapsed",
+    )
 with col_w2:
-    wind_speed = st.number_input("w_i", 0.0, 50.0, step=0.1, key="wind_input_key", on_change=sync_wind_input, label_visibility="collapsed")
+    wind_speed = st.number_input(
+        "w_i",
+        0.0,
+        30.0,
+        step=0.1,
+        key="wind_input_key",
+        on_change=sync_wind_input,
+        label_visibility="collapsed",
+    )
 
 st.sidebar.write("")
 predict_btn = st.sidebar.button("✨ ประเมินผลคุณภาพอากาศ", type="primary")
 
 # ==========================================
-# 7. หน้าจอแสดงผลหลัก
+# 8. Main Dashboard
 # ==========================================
-st.title("🌤️ ระบบวิเคราะห์คุณภาพอากาศ Real-Time แม่นยำสูง")
-st.caption("ดึงพิกัดจากชิป GPS บนอุปกรณ์ตรงจุด เพื่อประเมินค่าฝุ่นและเข้าโมเดล Machine Learning (150 Samples, 3 Features, 3 Classes)")
+st.title("🌤️ ระบบวิเคราะห์คุณภาพอากาศแม่นยำสูง (อ.รัตภูมิ / ระบุพื้นที่สด)")
+st.caption(
+    "ใช้พิกัดชิป GPS จริงเพื่อดึงข้อมูลฝุ่น PM2.5 และสภาพอากาศระดับตำบล ส่งประมวลผลต่อโมเดล ML (3 Features, 3 Classes, 150 Samples)"
+)
 st.divider()
 
 if "live_pm25" in st.session_state:
-    st.markdown(f"#### 📍 ข้อมูลสภาวะอากาศและฝุ่น ณ ตำแหน่ง: **{st.session_state.get('live_city', 'ไม่ระบุ')}**")
+    st.markdown(
+        f"#### 📍 ตำแหน่งพิกัดปัจจุบัน: **{st.session_state.get('live_city', 'ไม่ระบุ')}**"
+    )
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("ฝุ่น PM2.5 สด", f"{st.session_state['live_pm25']} µg/m³")
     m2.metric("ฝุ่น PM10 สด", f"{st.session_state['live_pm10']} µg/m³")
     m3.metric("ดัชนี US AQI", f"{st.session_state['live_aqi']}")
-    m4.metric("เวลาอัปเดต", datetime.now().strftime("%H:%M:%S น."))
+    m4.metric(
+        "เวลาอัปเดตล่าสุด", datetime.now().strftime("%H:%M:%S น.")
+    )
     st.divider()
 
 if predict_btn:
@@ -313,24 +407,32 @@ if predict_btn:
         0: {
             "title": "คุณภาพอากาศดีมาก 🟢 (Good)",
             "alert": "success",
-            "desc": "สภาพอากาศสะอาด เหมาะแก่การทำกิจกรรมกลางแจ้งและการออกกำลังกาย",
+            "desc": "อากาศสะอาด ปลอดภัยสำหรับชาวอำเภอรัตภูมิในการทำกิจกรรม outdoor",
             "tag": "ดี",
         },
         1: {
             "title": "คุณภาพอากาศปานกลาง 🟡 (Moderate)",
             "alert": "warning",
-            "desc": "ผู้มีภูมิแพ้หรือโรคทางเดินหายใจควรสวมหน้ากากอนามัยเมื่ออยู่กลางแจ้ง",
+            "desc": "ผู้มีโรคประจำตัวหรือภูมิแพ้ควรสวมหน้ากากอนามัยเมื่ออยู่กลางแจ้ง",
             "tag": "ปานกลาง",
         },
         2: {
             "title": "คุณภาพอากาศอยู่ในระดับเสี่ยงอันตราย 🔴 (Unhealthy)",
             "alert": "error",
-            "desc": "หลีกเลี่ยงกิจกรรมกลางแจ้งทุกชนิด และสวมหน้ากากป้องกันมลพิษ PM2.5 ทันที",
+            "desc": "อันตรายจากมลพิษ! หลีกเลี่ยงกิจกรรมกลางแจ้ง และสวมหน้ากาก PM2.5 ทันที",
             "tag": "อันตราย",
         },
     }
 
-    res = status_details.get(pred_code, {"title": "ไม่สามารถประเมินได้", "alert": "info", "desc": "-", "tag": "ไม่ทราบผล"})
+    res = status_details.get(
+        pred_code,
+        {
+            "title": "ไม่สามารถประเมินได้",
+            "alert": "info",
+            "desc": "-",
+            "tag": "ไม่ทราบผล",
+        },
+    )
 
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     history_file = "prediction_history.csv"
@@ -347,7 +449,13 @@ if predict_btn:
         ]
     )
     file_exists = os.path.exists(history_file)
-    new_data.to_csv(history_file, mode="a", header=not file_exists, index=False, encoding="utf-8-sig")
+    new_data.to_csv(
+        history_file,
+        mode="a",
+        header=not file_exists,
+        index=False,
+        encoding="utf-8-sig",
+    )
 
     col1, col2, col3 = st.columns([1.5, 1, 1])
     with col1:
@@ -358,29 +466,44 @@ if predict_btn:
             st.warning(f"### {res['title']}")
         else:
             st.error(f"### {res['title']}")
-        st.write(f"**คำแนะนำด้านสุขภาพ:** {res['desc']}")
+        st.write(f"**คำแนะนำสุขภาพ:** {res['desc']}")
 
     with col2:
-        st.metric(label="🎯 ความเชื่อมั่นโมเดล ML", value=f"{confidence:.1f}%", delta="ปกติ")
+        st.metric(
+            label="🎯 ความเชื่อมั่นโมเดล ML",
+            value=f"{confidence:.1f}%",
+            delta="ปกติ",
+        )
     with col3:
-        st.metric(label="🕒 เวลาประมวลผล", value=datetime.now().strftime("%H:%M:%S"), delta=datetime.now().strftime("%d/%m/%Y"))
+        st.metric(
+            label="🕒 เวลาประมวลผล",
+            value=datetime.now().strftime("%H:%M:%S"),
+            delta=datetime.now().strftime("%d/%m/%Y"),
+        )
 
 # ==========================================
-# 8. รายงานสรุปส่งอาจารย์
+# 9. รายงานสำหรับส่งอาจารย์
 # ==========================================
 st.divider()
-st.subheader("📊 ตารางชุดข้อมูล 150 Samples และประวัติการประเมิน")
+st.subheader("📊 ตารางชุดข้อมูล 150 ตัวอย่าง และประวัติการวิเคราะห์")
 
-tab1, tab2 = st.tabs(["📁 ชุดข้อมูล 150 Samples (สำหรับส่งอาจารย์)", "📋 บันทึกประวัติการวิเคราะห์"])
+tab1, tab2 = st.tabs(
+    ["📁 ชุดข้อมูล 150 Samples (ตรงโจทย์อาจารย์)", "📋 บันทึกประวัติการวิเคราะห์"]
+)
 
 with tab1:
-    st.write("**ตาราง Dataset (3 Features: อุณหภูมิ, ความชื้น, ความเร็วลม | 3 Classes: ดี, ปานกลาง, อันตราย | 150 ตัวอย่าง):**")
+    st.write(
+        "**โครงสร้าง Dataset: 3 Features (อุณหภูมิ, ความชื้น, ความเร็วลม) | 3 Classes (ดี, ปานกลาง, อันตราย) | 150 Samples**"
+    )
     st.dataframe(dataset_150, use_container_width=True)
 
 with tab2:
     history_file = "prediction_history.csv"
     if os.path.exists(history_file):
         df_history = pd.read_csv(history_file, encoding="utf-8-sig")
-        st.dataframe(df_history.tail(15).sort_values(by="Timestamp", ascending=False), use_container_width=True)
+        st.dataframe(
+            df_history.tail(10).sort_values(by="Timestamp", ascending=False),
+            use_container_width=True,
+        )
     else:
-        st.info("ยังไม่มีประวัติการบันทึกข้อมูล")
+        st.info("ยังไม่มีประวัติการกดประเมิน")
