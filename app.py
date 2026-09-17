@@ -14,7 +14,7 @@ import streamlit.components.v1 as components
 # 1. ตั้งค่าหน้าเว็บ
 # ==========================================
 st.set_page_config(
-    page_title="ระบบวิเคราะห์คุณภาพอากาศ Real-Time | รัตภูมิ สงขลา",
+    page_title="ระบบวิเคราะห์คุณภาพอากาศ Real-Time ประเทศไทย",
     page_icon="🌤️",
     layout="wide",
 )
@@ -37,25 +37,26 @@ st.markdown(
 )
 
 # ==========================================
-# 2. ฐานข้อมูล 77 จังหวัด (ค่าสำรอง)
+# 2. ฐานข้อมูลจังหวัดหลัก (ค่าสำรองสำหรับเลือกพื้นที่)
 # ==========================================
 THAI_PROVINCES = {
-    "สงขลา (รัตภูมิ / พิกัดศูนย์กลาง)": (7.1350, 100.2783),
-    "สงขลา (ตัวเมือง)": (7.1988, 100.5951),
     "กรุงเทพมหานคร": (13.7563, 100.5018),
     "เชียงใหม่": (18.7883, 98.9853),
-    "ภูเก็ต": (7.8804, 98.3923),
     "ขอนแก่น": (16.4322, 102.8236),
     "ชลบุรี": (13.3611, 100.9847),
+    "สงขลา": (7.1988, 100.5951),
+    "ภูเก็ต": (7.8804, 98.3923),
+    "นครราชสีมา": (14.9799, 102.0978),
+    "อุบลราชธานี": (15.2287, 104.8594),
 }
 
 # ==========================================
-# 3. Reverse Geocoding (ค้นหา ตำบล/อำเภอ/จังหวัด จาก พิกัด GPS สด)
+# 3. Reverse Geocoding (ค้นหา ตำบล/อำเภอ/จังหวัด จากพิกัด GPS)
 # ==========================================
 def get_exact_address(lat, lon):
     try:
         url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json&accept-language=th"
-        headers = {"User-Agent": "RattaphumAirCheck_App/1.0"}
+        headers = {"User-Agent": "ThaiAirQualityMonitor_App/2.0"}
         res = requests.get(url, headers=headers, timeout=5).json()
         address = res.get("address", {})
 
@@ -81,13 +82,13 @@ def get_exact_address(lat, lon):
         parts = [p for p in [suburb, district, province] if p]
         if parts:
             return " ".join(parts)
-        return f"พิกัดดาวเทียม ({lat:.4f}, {lon:.4f})"
+        return f"พิกัด ({lat:.4f}, {lon:.4f})"
     except Exception:
-        return f"พิกัดดาวเทียม ({lat:.4f}, {lon:.4f})"
+        return f"พิกัด ({lat:.4f}, {lon:.4f})"
 
 
 # ==========================================
-# 4. ดึงข้อมูลมลพิษระดับตาราง Grid 1 km จาก Open-Meteo
+# 4. ดึงข้อมูลมลพิษและสภาพอากาศ Real-Time จาก Open-Meteo
 # ==========================================
 def fetch_exact_weather_and_air(lat, lon):
     try:
@@ -113,7 +114,7 @@ def fetch_exact_weather_and_air(lat, lon):
 
 
 # ==========================================
-# 5. โมเดล ML ตามโจทย์อาจารย์ (3 Features, 3 Classes, 150 Samples)
+# 5. โมเดล Machine Learning (3 Features, 3 Classes, 150 Samples)
 # ==========================================
 @st.cache_resource
 def get_trained_model():
@@ -160,7 +161,7 @@ def get_trained_model():
 model_knn, dataset_150 = get_trained_model()
 
 # ==========================================
-# 6. Session State & Callbacks
+# 6. Session State & Callbacks Sync
 # ==========================================
 if "temp_slider_key" not in st.session_state:
     st.session_state.temp_slider_key = 28.0
@@ -198,27 +199,26 @@ def sync_wind_input():
 
 
 # ==========================================
-# 7. Sidebar Controls & GPS Device Hook
+# 7. Sidebar Controls & ดึงพิกัด GPS
 # ==========================================
 st.sidebar.markdown("### 🎛️ ตรวจสอบพิกัดอุปกรณ์สด (GPS)")
 st.sidebar.caption(
     f"📅 วันที่ปัจจุบัน: **{datetime.now().strftime('%d/%m/%Y')}**"
 )
 
-# JavaScript สั่งดึงพิกัดจากชิป GPS บนมือถือ/คอมพิวเตอร์
+# JavaScript ดึงพิกัด GPS บนอุปกรณ์ผู้ใช้
 gps_html = """
 <script>
 function getLocation() {
   if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(showPosition, showError, {enableHighAccuracy: true});
   } else {
-    alert("เบราว์เซอร์ไม่รองรับ GPS");
+    alert("เบราว์เซอร์ไม่รองรับการดึงพิกัด GPS");
   }
 }
 function showPosition(position) {
   const lat = position.coords.latitude;
   const lon = position.coords.longitude;
-  const urlParams = new URLSearchParams(window.location.search);
   window.parent.postMessage({
     type: 'streamlit:setQueryParams',
     queryParams: {lat: lat, lon: lon}
@@ -229,50 +229,49 @@ function showError(error) {
 }
 </script>
 <button onclick="getLocation()" style="width:100%; height:42px; background-color:#28a745; color:white; font-weight:bold; border:none; border-radius:8px; cursor:pointer;">
-📡 กดเพื่อดึงพิกัด GPS จริงจากดาวเทียม
+📡 กดเพื่อดึงพิกัด GPS สดจากอุปกรณ์ของคุณ
 </button>
 """
 components.html(gps_html, height=50)
 
-# เช็คว่ามี query param จาก GPS หรือไม่
 query_params = st.query_params
 gps_lat = query_params.get("lat", None)
 gps_lon = query_params.get("lon", None)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 📍 หรือเลือกพื้นที่ / ป้อนพิกัดมือ")
+st.sidebar.markdown("### 📍 เลือกพื้นที่ / ระบุพิกัดเอง")
 
 selected_mode = st.sidebar.radio(
     "โหมดระบุพื้นที่:",
-    ["พิกัดจากดาวเทียม GPS", "เลือกอำเภอ/จังหวัดในระบบ", "กรอก ละติจูด/ลองจิจูด เอง"],
+    ["พิกัดสดจาก GPS อุปกรณ์", "เลือกจังหวัดหลักในไทย", "กรอก ละติจูด/ลองจิจูด เอง"],
 )
 
-target_lat, target_lon = 7.1350, 100.2783  # ค่าเริ่มต้น: อ.รัตภูมิ สงขลา
+target_lat, target_lon = 13.7563, 100.5018  # ค่าเริ่มต้นกลาง (กรุงเทพมหานคร)
 
-if selected_mode == "พิกัดจากดาวเทียม GPS":
+if selected_mode == "พิกัดสดจาก GPS อุปกรณ์":
     if gps_lat and gps_lon:
         target_lat = float(gps_lat)
         target_lon = float(gps_lon)
-        st.sidebar.info(f"🎯 ได้รับ GPS สด: {target_lat:.4f}, {target_lon:.4f}")
+        st.sidebar.info(f"🎯 ได้รับค่า GPS: {target_lat:.4f}, {target_lon:.4f}")
     else:
         st.sidebar.warning(
-            "⚠️ กรุณากดปุ่มสีเขียวด้านบนเพื่อส่งค่า GPS จากอุปกรณ์เข้าสู่ระบบ"
+            "⚠️ กรุณากดปุ่มสีเขียวด้านบนเพื่ออนุญาตให้ดึงพิกัด GPS"
         )
-elif selected_mode == "เลือกอำเภอ/จังหวัดในระบบ":
+elif selected_mode == "เลือกจังหวัดหลักในไทย":
     prov_choice = st.sidebar.selectbox(
-        "เลือกพื้นที่:", list(THAI_PROVINCES.keys())
+        "เลือกจังหวัด:", list(THAI_PROVINCES.keys())
     )
     target_lat, target_lon = THAI_PROVINCES[prov_choice]
 else:
     target_lat = st.sidebar.number_input(
-        "Latitude (รัตภูมิ ~ 7.1350)", value=7.1350, format="%.5f"
+        "ละติจูด (Latitude)", value=13.7563, format="%.5f"
     )
     target_lon = st.sidebar.number_input(
-        "Longitude (รัตภูมิ ~ 100.2783)", value=100.2783, format="%.5f"
+        "ลองจิจูด (Longitude)", value=100.5018, format="%.5f"
     )
 
-if st.sidebar.button("🔄 ดึงข้อมูลสภาพอากาศจุดนี้แบบตรงเป๊ะ", use_container_width=True):
-    with st.spinner("กำลังเชื่อมต่อดาวเทียมและสถานีวัดอากาศใกล้ที่สุด..."):
+if st.sidebar.button("🔄 ดึงข้อมูลสภาพอากาศจุดนี้แบบ Real-Time", use_container_width=True):
+    with st.spinner("กำลังดึงข้อมูลสภาพอากาศและมลพิษล่าสุด..."):
         data = fetch_exact_weather_and_air(target_lat, target_lon)
 
         if data:
@@ -287,7 +286,7 @@ if st.sidebar.button("🔄 ดึงข้อมูลสภาพอากา�
             st.session_state.hum_input_key = st.session_state.hum_slider_key
 
             st.session_state.wind_slider_key = min(
-                max(data["wind"], 0.0), 30.0
+                max(data["wind"], 0.0), 50.0
             )
             st.session_state.wind_input_key = st.session_state.wind_slider_key
 
@@ -299,7 +298,7 @@ if st.sidebar.button("🔄 ดึงข้อมูลสภาพอากา�
             st.sidebar.success(f"📍 ระบุตำแหน่ง: {data['location_name']}")
             st.rerun()
 
-# Controls
+# แถบปรับค่าฟีเจอร์
 st.sidebar.markdown("---")
 st.sidebar.markdown("**🌡️ อุณหภูมิ (°C)**")
 col_t1, col_t2 = st.sidebar.columns([1.3, 1])
@@ -353,7 +352,7 @@ with col_w1:
     st.slider(
         "w_s",
         0.0,
-        30.0,
+        50.0,
         step=0.1,
         key="wind_slider_key",
         on_change=sync_wind_slider,
@@ -363,7 +362,7 @@ with col_w2:
     wind_speed = st.number_input(
         "w_i",
         0.0,
-        30.0,
+        50.0,
         step=0.1,
         key="wind_input_key",
         on_change=sync_wind_input,
@@ -374,11 +373,11 @@ st.sidebar.write("")
 predict_btn = st.sidebar.button("✨ ประเมินผลคุณภาพอากาศ", type="primary")
 
 # ==========================================
-# 8. Main Dashboard
+# 8. ส่วนแสดงผลหลัก (Main Dashboard)
 # ==========================================
-st.title("🌤️ ระบบวิเคราะห์คุณภาพอากาศแม่นยำสูง (อ.รัตภูมิ / ระบุพื้นที่สด)")
+st.title("🌤️ ระบบวิเคราะห์คุณภาพอากาศ Real-Time ประเทศไทย")
 st.caption(
-    "ใช้พิกัดชิป GPS จริงเพื่อดึงข้อมูลฝุ่น PM2.5 และสภาพอากาศระดับตำบล ส่งประมวลผลต่อโมเดล ML (3 Features, 3 Classes, 150 Samples)"
+    "ระบบดึงสภาพอากาศและปริมาณฝุ่นสดรายตำแหน่ง ประมวลผลร่วมกับโมเดล Machine Learning (3 Features, 3 Classes, 150 Samples)"
 )
 st.divider()
 
@@ -407,19 +406,19 @@ if predict_btn:
         0: {
             "title": "คุณภาพอากาศดีมาก 🟢 (Good)",
             "alert": "success",
-            "desc": "อากาศสะอาด ปลอดภัยสำหรับชาวอำเภอรัตภูมิในการทำกิจกรรม outdoor",
+            "desc": "สภาพอากาศสะอาด เหมาะแก่การทำกิจกรรมกลางแจ้งและการออกกำลังกาย",
             "tag": "ดี",
         },
         1: {
             "title": "คุณภาพอากาศปานกลาง 🟡 (Moderate)",
             "alert": "warning",
-            "desc": "ผู้มีโรคประจำตัวหรือภูมิแพ้ควรสวมหน้ากากอนามัยเมื่ออยู่กลางแจ้ง",
+            "desc": "ผู้มีโรคประจำตัวหรือระบบทางเดินหายใจควรสวมหน้ากากอนามัยเมื่ออยู่กลางแจ้ง",
             "tag": "ปานกลาง",
         },
         2: {
             "title": "คุณภาพอากาศอยู่ในระดับเสี่ยงอันตราย 🔴 (Unhealthy)",
             "alert": "error",
-            "desc": "อันตรายจากมลพิษ! หลีกเลี่ยงกิจกรรมกลางแจ้ง และสวมหน้ากาก PM2.5 ทันที",
+            "desc": "อันตรายจากมลพิษ! หลีกเลี่ยงกิจกรรมกลางแจ้ง และสวมหน้ากากป้องกัน PM2.5 ทันที",
             "tag": "อันตราย",
         },
     }
@@ -482,13 +481,13 @@ if predict_btn:
         )
 
 # ==========================================
-# 9. รายงานสำหรับส่งอาจารย์
+# 9. รายงานสำหรับตรวจเช็คและส่งอาจารย์
 # ==========================================
 st.divider()
 st.subheader("📊 ตารางชุดข้อมูล 150 ตัวอย่าง และประวัติการวิเคราะห์")
 
 tab1, tab2 = st.tabs(
-    ["📁 ชุดข้อมูล 150 Samples (ตรงโจทย์อาจารย์)", "📋 บันทึกประวัติการวิเคราะห์"]
+    ["📁 ชุดข้อมูล 150 Samples (สำหรับตรวจเช็ค)", "📋 บันทึกประวัติการวิเคราะห์"]
 )
 
 with tab1:
