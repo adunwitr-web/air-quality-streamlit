@@ -56,7 +56,7 @@ THAI_PROVINCES = {
 def get_exact_address(lat, lon):
     try:
         url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json&accept-language=th"
-        headers = {"User-Agent": "ThaiAirQualityMonitor_App/2.0"}
+        headers = {"User-Agent": "ThaiAirQualityMonitor_App/3.0"}
         res = requests.get(url, headers=headers, timeout=5).json()
         address = res.get("address", {})
 
@@ -199,7 +199,7 @@ def sync_wind_input():
 
 
 # ==========================================
-# 7. Sidebar Controls & ดึงพิกัด GPS (แก้ไขปัญหาสนิท: Timeout Expired)
+# 7. Sidebar Controls & ดึงพิกัด GPS สด (สคริปต์ความเร็วสูง)
 # ==========================================
 st.sidebar.markdown("### 🎛️ ตรวจสอบพิกัดอุปกรณ์สด (GPS)")
 st.sidebar.caption(
@@ -215,50 +215,48 @@ gps_html = """
 </div>
 
 <script>
-function updateUrlWithCoords(lat, lon) {
-    const topUrl = new URL(window.top.location.href);
-    topUrl.searchParams.set('lat', lat);
-    topUrl.searchParams.set('lon', lon);
-    window.top.location.href = topUrl.href;
+function sendToStreamlit(lat, lon) {
+    const status = document.getElementById('gps-status');
+    status.innerHTML = "✅ ได้รับพิกัดแล้ว";
+    
+    // อัปเดตผ่าน URL Search Params โดยตรงไม่ให้ค้างหน้าเว็บ
+    const searchParams = new URLSearchParams(window.parent.location.search);
+    searchParams.set('lat', lat);
+    searchParams.set('lon', lon);
+    window.parent.location.search = searchParams.toString();
 }
 
 function fetchLocationByIP() {
     const status = document.getElementById('gps-status');
-    status.innerHTML = "กำลังดึงพิกัดจากเน็ตเครือข่าย...";
+    status.innerHTML = "กำลังค้นหาตำแหน่งแบบรวดเร็ว...";
     fetch('https://ipapi.co/json/')
         .then(response => response.json())
         .then(data => {
             if (data.latitude && data.longitude) {
-                status.innerHTML = "พบพิกัดแล้ว กำลังโหลดข้อมูล...";
-                updateUrlWithCoords(data.latitude, data.longitude);
+                sendToStreamlit(data.latitude, data.longitude);
             } else {
-                status.innerHTML = "<span style='color:red;'>ไม่สามารถดึงพิกัดได้</span>";
+                status.innerHTML = "<span style='color:red;'>ดึงพิกัดไม่สำเร็จ กรุณากรอกเอง</span>";
             }
         })
-        .catch(err => {
-            status.innerHTML = "<span style='color:red;'>ดึงพิกัดล้มเหลว</span>";
+        .catch(() => {
+            status.innerHTML = "<span style='color:red;'>การดึงพิกัดขัดข้อง</span>";
         });
 }
 
 function getLocation() {
   const status = document.getElementById('gps-status');
-  status.innerHTML = "กำลังค้นหาตำแหน่ง...";
+  status.innerHTML = "กำลังค้นหาพิกัด...";
 
   if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(
       function(position) {
-        status.innerHTML = "พบพิกัดแล้ว กำลังอัปเดต...";
-        updateUrlWithCoords(position.coords.latitude, position.coords.longitude);
+        sendToStreamlit(position.coords.latitude, position.coords.longitude);
       },
-      function(error) {
-        // เมื่อเจอ Timeout หรือ Error อื่นๆ บน PC ให้ใช้ระบบสำรอง (IP Location) ทันที
+      function() {
+        // หากค้นหาแบบ High Accuracy ช้า จะสลับไปดึงผ่าน IP ทันที
         fetchLocationByIP();
       },
-      { 
-        enableHighAccuracy: false, // ปิดโหมดความแม่นยำสูงเพื่อป้องกัน Timeout บนคอมพิวเตอร์
-        timeout: 4000,             // ลดเวลาการรอลงเหลือ 4 วินาที
-        maximumAge: 60000 
-      }
+      { enableHighAccuracy: false, timeout: 2500, maximumAge: 0 }
     );
   } else {
     fetchLocationByIP();
@@ -286,7 +284,7 @@ if selected_mode == "พิกัดสดจาก GPS อุปกรณ์":
     if gps_lat and gps_lon:
         target_lat = float(gps_lat)
         target_lon = float(gps_lon)
-        st.sidebar.info(f"🎯 ได้รับค่า GPS: {target_lat:.4f}, {target_lon:.4f}")
+        st.sidebar.info(f"🎯 พิกัดปัจจุบัน: {target_lat:.4f}, {target_lon:.4f}")
     else:
         st.sidebar.warning(
             "⚠️ กรุณากดปุ่มสีเขียวด้านบนเพื่อดึงพิกัดอุปกรณ์"
